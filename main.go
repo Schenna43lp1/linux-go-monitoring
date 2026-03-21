@@ -4,69 +4,72 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fatih/color"
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
+
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/load"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-func formatUptime(seconds uint64) string {
-	h := seconds / 3600
-	m := (seconds % 3600) / 60
-	return fmt.Sprintf("%dh %dm", h, m)
-}
-
-func colorize(percent float64) string {
-	if percent < 50 {
-		return color.GreenString("%.2f %%", percent)
-	} else if percent < 80 {
-		return color.YellowString("%.2f %%", percent)
-	}
-	return color.RedString("%.2f %%", percent)
-}
-
 func main() {
-	for {
-		fmt.Print("\033[H\033[2J") // Clear screen
+	a := app.New()
+	w := a.NewWindow("Linux Monitor")
+	w.Resize(fyne.NewSize(420, 260))
 
-		cpuPercent, _ := cpu.Percent(0, false)
-		vmem, _ := mem.VirtualMemory()
-		diskStat, _ := disk.Usage("/")
-		loadStat, _ := load.Avg()
-		uptime, _ := host.Uptime()
+	cpuLabel := widget.NewLabel("CPU: lädt...")
+	ramLabel := widget.NewLabel("RAM: lädt...")
+	diskLabel := widget.NewLabel("Disk: lädt...")
 
-		fmt.Println("╔══════════════════════════════╗")
-		fmt.Println("║   🖥️  LINUX MONITOR v1       ║")
-		fmt.Println("╠══════════════════════════════╣")
+	cpuBar := widget.NewProgressBar()
+	ramBar := widget.NewProgressBar()
+	diskBar := widget.NewProgressBar()
 
-		if len(cpuPercent) > 0 {
-			fmt.Printf(" CPU     │ %s\n", colorize(cpuPercent[0]))
+	content := container.NewVBox(
+		widget.NewLabel("Systemübersicht"),
+		cpuLabel,
+		cpuBar,
+		ramLabel,
+		ramBar,
+		diskLabel,
+		diskBar,
+	)
+
+	w.SetContent(content)
+
+	go func() {
+		for {
+			cpuPercent, _ := cpu.Percent(0, false)
+			vmem, _ := mem.VirtualMemory()
+			diskStat, _ := disk.Usage("/")
+
+			if len(cpuPercent) > 0 {
+				c := cpuPercent[0]
+				cpuLabel.SetText(fmt.Sprintf("CPU: %.2f%%", c))
+				cpuBar.SetValue(c / 100)
+			}
+
+			ramLabel.SetText(fmt.Sprintf(
+				"RAM: %.2f%% (%.1f / %.1f GB)",
+				vmem.UsedPercent,
+				float64(vmem.Used)/1024/1024/1024,
+				float64(vmem.Total)/1024/1024/1024,
+			))
+			ramBar.SetValue(vmem.UsedPercent / 100)
+
+			diskLabel.SetText(fmt.Sprintf(
+				"Disk: %.2f%% (%.1f / %.1f GB)",
+				diskStat.UsedPercent,
+				float64(diskStat.Used)/1024/1024/1024,
+				float64(diskStat.Total)/1024/1024/1024,
+			))
+			diskBar.SetValue(diskStat.UsedPercent / 100)
+
+			time.Sleep(2 * time.Second)
 		}
+	}()
 
-		fmt.Printf(" RAM     │ %s  (%.1f / %.1f GB)\n",
-			colorize(vmem.UsedPercent),
-			float64(vmem.Used)/1024/1024/1024,
-			float64(vmem.Total)/1024/1024/1024,
-		)
-
-		fmt.Printf(" DISK    │ %s  (%.0f / %.0f GB)\n",
-			colorize(diskStat.UsedPercent),
-			float64(diskStat.Used)/1024/1024/1024,
-			float64(diskStat.Total)/1024/1024/1024,
-		)
-
-		fmt.Printf(" LOAD    │ %.2f | %.2f | %.2f\n",
-			loadStat.Load1,
-			loadStat.Load5,
-			loadStat.Load15,
-		)
-
-		fmt.Printf(" UPTIME  │ %s\n", formatUptime(uptime))
-
-		fmt.Println("╚══════════════════════════════╝")
-
-		time.Sleep(2 * time.Second)
-	}
+	w.ShowAndRun()
 }
