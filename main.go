@@ -2,6 +2,12 @@
 
 package main
 
+// This is a simple Linux system monitor application built using the Fyne GUI toolkit. It displays CPU, RAM, and Disk usage in a window, updating every 2 seconds.
+// The application uses the gopsutil library to retrieve system statistics and Fyne to create the user interface. It also handles graceful shutdown when the window is closed.
+// Note: Ensure you have the necessary permissions to access system stats and that you have the gopsutil library installed in your Go environment.
+// To run this application, save the code in a file named main.go, and execute `go run main.go` in your terminal. You should see a window displaying the current CPU, RAM, and Disk usage of your Linux system.
+// Make sure to have the Fyne library installed as well, which you can do using `go get fyne.io/fyne/v2`.
+// This code is intended for Linux systems and may not work correctly on other operating systems due to differences in how system statistics are accessed and displayed.
 import (
 	"fmt"
 	"time"
