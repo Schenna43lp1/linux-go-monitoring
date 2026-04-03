@@ -1,262 +1,149 @@
 //go:build linux
 
+// main.go – Einstiegspunkt: initialisiert App, verdrahtet alle Komponenten und startet den Update-Loop.
 package main
 
 import (
-	"fmt"
-	"image/color"
-	"sync"
-	"time"
+"context"
+"fmt"
+"strings"
+"time"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
-
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/mem"
+"fyne.io/fyne/v2"
+"fyne.io/fyne/v2/app"
+"fyne.io/fyne/v2/container"
+"fyne.io/fyne/v2/theme"
+"fyne.io/fyne/v2/widget"
 )
 
-// MetricHistory stores a rolling window of metric values (0–100).
-type MetricHistory struct {
-	mu      sync.Mutex
-	values  []float64
-	maxSize int
-}
-
-func NewMetricHistory(maxSize int) *MetricHistory {
-	return &MetricHistory{
-		values:  make([]float64, 0, maxSize),
-		maxSize: maxSize,
-	}
-}
-
-func (h *MetricHistory) Add(value float64) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.values = append(h.values, value)
-	if len(h.values) > h.maxSize {
-		h.values = h.values[1:]
-	}
-}
-
-func (h *MetricHistory) GetValues() []float64 {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make([]float64, len(h.values))
-	copy(out, h.values)
-	return out
-}
-
-// GraphWidget is a custom Fyne widget that draws a line graph for a 0–100 metric.
-type GraphWidget struct {
-	widget.BaseWidget
-	values    []float64
-	maxSize   int
-	lineColor color.Color
-}
-
-func NewGraphWidget(maxSize int, c color.Color) *GraphWidget {
-	g := &GraphWidget{maxSize: maxSize, lineColor: c}
-	g.ExtendBaseWidget(g)
-	return g
-}
-
-// Update replaces the displayed values and triggers a repaint (call on main goroutine).
-func (g *GraphWidget) Update(values []float64) {
-	g.values = make([]float64, len(values))
-	copy(g.values, values)
-	g.Refresh()
-}
-
-func (g *GraphWidget) CreateRenderer() fyne.WidgetRenderer {
-	bg := canvas.NewRectangle(color.NRGBA{R: 18, G: 18, B: 18, A: 255})
-
-	gridColor := color.NRGBA{R: 55, G: 55, B: 55, A: 255}
-	midColor := color.NRGBA{R: 75, G: 75, B: 75, A: 255}
-	grid25 := canvas.NewLine(gridColor)
-	grid50 := canvas.NewLine(midColor)
-	grid75 := canvas.NewLine(gridColor)
-
-	lines := make([]*canvas.Line, g.maxSize-1)
-	for i := range lines {
-		l := canvas.NewLine(g.lineColor)
-		l.StrokeWidth = 1.5
-		l.Hidden = true
-		lines[i] = l
-	}
-
-	objects := make([]fyne.CanvasObject, 0, 4+len(lines))
-	objects = append(objects, bg, grid25, grid50, grid75)
-	for _, l := range lines {
-		objects = append(objects, l)
-	}
-
-	return &graphRenderer{
-		graph:   g,
-		bg:      bg,
-		grid25:  grid25,
-		grid50:  grid50,
-		grid75:  grid75,
-		lines:   lines,
-		objects: objects,
-	}
-}
-
-type graphRenderer struct {
-	graph   *GraphWidget
-	bg      *canvas.Rectangle
-	grid25  *canvas.Line
-	grid50  *canvas.Line
-	grid75  *canvas.Line
-	lines   []*canvas.Line
-	objects []fyne.CanvasObject
-	size    fyne.Size
-}
-
-func (r *graphRenderer) Layout(size fyne.Size) {
-	r.size = size
-	r.bg.Resize(size)
-	r.Refresh()
-}
-
-func (r *graphRenderer) MinSize() fyne.Size { return fyne.NewSize(200, 80) }
-
-func (r *graphRenderer) Refresh() {
-	w, h := r.size.Width, r.size.Height
-
-	setGrid := func(l *canvas.Line, pct float32) {
-		y := h * (1 - pct)
-		l.Position1 = fyne.NewPos(0, y)
-		l.Position2 = fyne.NewPos(w, y)
-		l.Refresh()
-	}
-	setGrid(r.grid25, 0.25)
-	setGrid(r.grid50, 0.50)
-	setGrid(r.grid75, 0.75)
-
-	values := r.graph.values
-	n := len(values)
-	maxPts := r.graph.maxSize
-
-	for i, l := range r.lines {
-		if i >= n-1 {
-			l.Hidden = true
-			l.Refresh()
-			continue
-		}
-		l.Hidden = false
-		x1 := float32(i) / float32(maxPts-1) * w
-		y1 := h - float32(values[i])/100*h
-		x2 := float32(i+1) / float32(maxPts-1) * w
-		y2 := h - float32(values[i+1])/100*h
-		l.Position1 = fyne.NewPos(x1, y1)
-		l.Position2 = fyne.NewPos(x2, y2)
-		l.Refresh()
-	}
-	r.bg.Refresh()
-}
-
-func (r *graphRenderer) Objects() []fyne.CanvasObject { return r.objects }
-func (r *graphRenderer) Destroy()                     {}
-
-func statCard(title string, valueLabel *widget.Label, bar *widget.ProgressBar, graph *GraphWidget) *fyne.Container {
-	return container.NewVBox(
-		widget.NewLabel(title),
-		valueLabel,
-		bar,
-		graph,
-		widget.NewSeparator(),
-	)
-}
-
 func main() {
-	a := app.New()
-	w := a.NewWindow("Linux Monitor")
-	w.Resize(fyne.NewSize(600, 560))
+a := app.New()
+a.Settings().SetTheme(theme.DarkTheme())
+w := a.NewWindow("Linux Monitor")
+w.Resize(cfg.WindowSize)
 
-	title := widget.NewLabel("Linux Monitor")
+cpuCard     := newDashCard("🖥  CPU",     colorCPU,     true,  false)
+ramCard     := newDashCard("🧠  RAM",     colorRAM,     true,  false)
+diskCard    := newDashCard("💾  DISK",    colorDisk,    true,  false)
+netCard     := newDashCard("🌐  NETWORK", colorNetDown, false, true)
+netDownCard := newDashCard("↓  Download", colorNetDown, false, true)
+netUpCard   := newDashCard("↑  Upload",   colorNetUp,   false, true)
 
-	cpuLabel := widget.NewLabel("lädt...")
-	ramLabel := widget.NewLabel("lädt...")
-	diskLabel := widget.NewLabel("lädt...")
+gpuUtilCard := newDashCard("🎮  GPU Utilization", colorGPU,  true,  false)
+gpuVRAMCard := newDashCard("💠  VRAM",            colorVRAM, true,  false)
+gpuNameLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 
-	cpuBar := widget.NewProgressBar()
-	ramBar := widget.NewProgressBar()
-	diskBar := widget.NewProgressBar()
+collector               := newCollector()
+sysInfoData             := collector.SystemInfo()
+systemTab, uptimeValLabel := buildSystemTab(sysInfoData)
 
-	const histSize = 60
-	cpuHistory := NewMetricHistory(histSize)
-	ramHistory := NewMetricHistory(histSize)
-	diskHistory := NewMetricHistory(histSize)
-
-	cpuGraph := NewGraphWidget(histSize, color.NRGBA{R: 0, G: 210, B: 100, A: 255})
-	ramGraph := NewGraphWidget(histSize, color.NRGBA{R: 30, G: 150, B: 255, A: 255})
-	diskGraph := NewGraphWidget(histSize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
-
-	grid := container.NewGridWithColumns(1,
-		statCard("CPU", cpuLabel, cpuBar, cpuGraph),
-		statCard("RAM", ramLabel, ramBar, ramGraph),
-		statCard("DISK", diskLabel, diskBar, diskGraph),
+tabs := container.NewAppTabs(
+buildOverviewTab(cpuCard, ramCard, diskCard, netCard),
+buildNetworkTab(netDownCard, netUpCard),
+systemTab,
+		buildGPUTab(gpuUtilCard, gpuVRAMCard, gpuNameLabel),
 	)
 
-	w.SetContent(container.NewVBox(
-		title,
-		widget.NewSeparator(),
-		grid,
-	))
+uptimeLabel := widget.NewLabel("")
+darkMode := true
+themeBtn := widget.NewButton("☀️ Light", nil)
+themeBtn.OnTapped = func() {
+if darkMode {
+a.Settings().SetTheme(theme.LightTheme())
+themeBtn.SetText("🌙 Dark")
+} else {
+a.Settings().SetTheme(theme.DarkTheme())
+themeBtn.SetText("☀️ Light")
+}
+darkMode = !darkMode
+}
+header := container.NewBorder(nil, nil,
+widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+container.NewHBox(uptimeLabel, themeBtn),
+)
 
-	quit := make(chan struct{})
-	w.SetOnClosed(func() { close(quit) })
+alertLabel  := widget.NewLabel("")
+footerLabel := widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Italic: true})
 
-	go func() {
-		cpu.Percent(0, false) // warmup: initializes the baseline measurement
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
+w.SetContent(container.NewBorder(
+container.NewVBox(header, widget.NewSeparator(), alertLabel, widget.NewSeparator()),
+container.NewVBox(widget.NewSeparator(), footerLabel),
+nil, nil,
+tabs,
+))
 
-		for {
-			select {
-			case <-quit:
-				return
-			case <-ticker.C:
-				cpuPercent, _ := cpu.Percent(0, false)
-				vmem, _ := mem.VirtualMemory()
-				diskStat, _ := disk.Usage("/")
+ctx, cancel := context.WithCancel(context.Background())
+w.SetOnClosed(cancel)
 
-				if len(cpuPercent) > 0 {
-					cpuHistory.Add(cpuPercent[0])
-				}
-				ramHistory.Add(vmem.UsedPercent)
-				diskHistory.Add(diskStat.UsedPercent)
+go RunLoop(ctx, collector, NewHistories(cfg.HistorySize), func(m Metrics, h *Histories) {
+uptimeLabel.SetText("  |  Uptime: " + formatUptime(m.Uptime))
+uptimeValLabel.SetText(formatUptime(m.Uptime))
+footerLabel.SetText("Last updated: " + time.Now().Format("15:04:05"))
 
-				fyne.Do(func() {
-					if len(cpuPercent) > 0 {
-						cpuBar.SetValue(cpuPercent[0] / 100)
-						cpuLabel.SetText(fmt.Sprintf("%.2f%%", cpuPercent[0]))
-						cpuGraph.Update(cpuHistory.GetValues())
-					}
+var alerts []string
+if m.CPUPercent >= thresholdCrit {
+alerts = append(alerts, fmt.Sprintf("CPU %.0f%%", m.CPUPercent))
+}
+if m.RAMPercent >= thresholdCrit {
+alerts = append(alerts, fmt.Sprintf("RAM %.0f%%", m.RAMPercent))
+}
+if m.DiskPercent >= thresholdCrit {
+alerts = append(alerts, fmt.Sprintf("Disk %.0f%%", m.DiskPercent))
+}
+if len(alerts) > 0 {
+alertLabel.SetText("⚠️  Critical: " + strings.Join(alerts, " · "))
+} else {
+alertLabel.SetText("")
+}
 
-					ramBar.SetValue(vmem.UsedPercent / 100)
-					ramLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-						vmem.UsedPercent,
-						float64(vmem.Used)/1024/1024/1024,
-						float64(vmem.Total)/1024/1024/1024,
-					))
-					ramGraph.Update(ramHistory.GetValues())
+cpuCard.Status.SetText(statusDot(m.CPUPercent))
+cpuCard.Value.SetText(fmt.Sprintf("%.1f%%", m.CPUPercent))
+if m.HasTemp {
+cpuCard.Sub.SetText(fmt.Sprintf("🌡  %.1f °C", m.CPUTemp))
+}
+cpuCard.Bar.SetValue(m.CPUPercent / 100)
+cpuCard.Graph.Update(h.CPU.Values())
 
-					diskBar.SetValue(diskStat.UsedPercent / 100)
-					diskLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-						diskStat.UsedPercent,
-						float64(diskStat.Used)/1024/1024/1024,
-						float64(diskStat.Total)/1024/1024/1024,
-					))
-					diskGraph.Update(diskHistory.GetValues())
-				})
-			}
+ramCard.Status.SetText(statusDot(m.RAMPercent))
+ramCard.Value.SetText(fmt.Sprintf("%.1f%%", m.RAMPercent))
+ramCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB", m.RAMUsed/1e9, m.RAMTotal/1e9))
+ramCard.Bar.SetValue(m.RAMPercent / 100)
+ramCard.Graph.Update(h.RAM.Values())
+
+diskCard.Status.SetText(statusDot(m.DiskPercent))
+diskCard.Value.SetText(fmt.Sprintf("%.1f%%", m.DiskPercent))
+diskCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB", m.DiskUsed/1e9, m.DiskTotal/1e9))
+diskCard.Bar.SetValue(m.DiskPercent / 100)
+diskCard.Graph.Update(h.Disk.Values())
+
+netCard.Value.SetText(fmt.Sprintf("↓  %s", formatSpeed(m.DownloadBps)))
+netCard.Sub.SetText(fmt.Sprintf("↑  %s", formatSpeed(m.UploadBps)))
+netCard.Graph.Update(h.NetDown.Values())
+
+netDownCard.Value.SetText(formatSpeed(m.DownloadBps))
+netDownCard.Graph.Update(h.NetDown.Values())
+
+netUpCard.Value.SetText(formatSpeed(m.UploadBps))
+netUpCard.Graph.Update(h.NetUp.Values())
+
+		if m.GPU.HasGPU {
+			gpuNameLabel.SetText(m.GPU.Name)
+			gpuUtilCard.Status.SetText(statusDot(m.GPU.UtilPercent))
+			gpuUtilCard.Value.SetText(fmt.Sprintf("%.1f%%", m.GPU.UtilPercent))
+			gpuUtilCard.Sub.SetText(fmt.Sprintf("🌡  %.1f °C", m.GPU.Temp))
+			gpuUtilCard.Bar.SetValue(m.GPU.UtilPercent / 100)
+			gpuUtilCard.Graph.Update(h.GPUUtil.Values())
+
+			gpuVRAMCard.Status.SetText(statusDot(m.GPU.VRAMPercent))
+			gpuVRAMCard.Value.SetText(fmt.Sprintf("%.1f%%", m.GPU.VRAMPercent))
+			gpuVRAMCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB", m.GPU.VRAMUsed/1e9, m.GPU.VRAMTotal/1e9))
+			gpuVRAMCard.Bar.SetValue(m.GPU.VRAMPercent / 100)
+			gpuVRAMCard.Graph.Update(h.GPUVRAMPct.Values())
+		} else {
+			gpuNameLabel.SetText("No GPU detected")
 		}
-	}()
+})
 
-	w.ShowAndRun()
+
+w.ShowAndRun()
 }
