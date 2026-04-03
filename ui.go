@@ -4,6 +4,7 @@
 package main
 
 import (
+"fmt"
 "fyne.io/fyne/v2"
 "fyne.io/fyne/v2/container"
 "fyne.io/fyne/v2/widget"
@@ -50,7 +51,43 @@ widget.NewLabel("Uptime"),   uptimeValLabel,
 return tab, uptimeValLabel
 }
 
-// buildGPUTab creates the GPU tab with utilization and VRAM cards.
+// buildDiskTab creates the Disk tab with a dynamically updated list of partitions.
+// Returns the tab and the VBox container that gets refreshed each tick.
+func buildDiskTab() (*container.TabItem, *fyne.Container) {
+	vbox := container.NewVBox(widget.NewLabel("Loading…"))
+	tab := container.NewTabItem("💾  Disks",
+		container.NewScroll(container.NewPadded(vbox)),
+	)
+	return tab, vbox
+}
+
+// updateDiskTab rebuilds the disk tab content from the latest partition list.
+func updateDiskTab(vbox *fyne.Container, disks []DiskPartition) {
+	var objects []fyne.CanvasObject
+	for _, d := range disks {
+		d := d
+		mount := widget.NewLabelWithStyle(d.Mount, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		status := widget.NewLabel(statusDot(d.Percent))
+		header := container.NewBorder(nil, nil, mount, status)
+
+		val := widget.NewLabelWithStyle(
+			fmt.Sprintf("%.1f%%", d.Percent),
+			fyne.TextAlignLeading, fyne.TextStyle{Bold: true},
+		)
+		sub := widget.NewLabel(fmt.Sprintf("%.1f / %.1f GB", d.Used/1e9, d.Total/1e9))
+		bar := widget.NewProgressBar()
+		bar.SetValue(d.Percent / 100)
+
+		card := container.NewPadded(container.NewVBox(header, val, sub, bar))
+		objects = append(objects, card, widget.NewSeparator())
+	}
+	if len(objects) == 0 {
+		objects = []fyne.CanvasObject{widget.NewLabel("No disks found")}
+	}
+	vbox.Objects = objects
+	vbox.Refresh()
+}
+
 func buildGPUTab(util, vram *dashCard, nameLabel *widget.Label) *container.TabItem {
 return container.NewTabItem("GPU",
 container.NewScroll(container.NewVBox(

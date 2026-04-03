@@ -36,10 +36,12 @@ gpuNameLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextSty
 collector               := newCollector()
 sysInfoData             := collector.SystemInfo()
 systemTab, uptimeValLabel := buildSystemTab(sysInfoData)
+diskTab, diskVBox         := buildDiskTab()
 
 tabs := container.NewAppTabs(
 buildOverviewTab(cpuCard, ramCard, diskCard, netCard),
 buildNetworkTab(netDownCard, netUpCard),
+diskTab,
 systemTab,
 		buildGPUTab(gpuUtilCard, gpuVRAMCard, gpuNameLabel),
 	)
