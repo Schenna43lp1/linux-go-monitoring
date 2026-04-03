@@ -1,5 +1,5 @@
-Linux Monitoring
-CPU usage 
-RAM usage
-Disk usage
-## GUI all in go
+# Linux Monitor too in go
+
+to start use sudo ./install.sh
+or 
+go run main.go

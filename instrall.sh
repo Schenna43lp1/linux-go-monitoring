@@ -1,4 +1,10 @@
 #!/bin/bash
+# Install script for Linux Monitor
+# This script builds the application, installs it to /usr/local/bin, and creates a desktop entry for easy access.
+# Usage: Run this script from the root of the project directory.
+# Note: You may need to run this script with sudo if you don't have permission to write to /usr/local/bin.
+# Example: sudo ./install.sh
+
 set -e
 
 APP_NAME="linux-monitor"

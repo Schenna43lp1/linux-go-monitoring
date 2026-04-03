@@ -2,19 +2,15 @@
 
 package main
 
-// This is a simple Linux system monitor application built using the Fyne GUI toolkit. It displays CPU, RAM, and Disk usage in a window, updating every 2 seconds.
-// The application uses the gopsutil library to retrieve system statistics and Fyne to create the user interface. It also handles graceful shutdown when the window is closed.
-// Note: Ensure you have the necessary permissions to access system stats and that you have the gopsutil library installed in your Go environment.
-// To run this application, save the code in a file named main.go, and execute `go run main.go` in your terminal. You should see a window displaying the current CPU, RAM, and Disk usage of your Linux system.
-// Make sure to have the Fyne library installed as well, which you can do using `go get fyne.io/fyne/v2`.
-// This code is intended for Linux systems and may not work correctly on other operating systems due to differences in how system statistics are accessed and displayed.
 import (
 	"fmt"
+	"image/color"
 	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
@@ -23,23 +19,21 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-// CPUHistory stores historical CPU load values
-type CPUHistory struct {
+// MetricHistory stores a rolling window of metric values (0–100).
+type MetricHistory struct {
 	mu      sync.Mutex
 	values  []float64
 	maxSize int
 }
 
-// NewCPUHistory creates a new CPU history tracker
-func NewCPUHistory(maxSize int) *CPUHistory {
-	return &CPUHistory{
+func NewMetricHistory(maxSize int) *MetricHistory {
+	return &MetricHistory{
 		values:  make([]float64, 0, maxSize),
 		maxSize: maxSize,
 	}
 }
 
-// Add adds a new CPU value to history
-func (h *CPUHistory) Add(value float64) {
+func (h *MetricHistory) Add(value float64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.values = append(h.values, value)
@@ -48,64 +42,144 @@ func (h *CPUHistory) Add(value float64) {
 	}
 }
 
-// GetSparkline returns a sparkline representation of CPU history
-func (h *CPUHistory) GetSparkline() string {
+func (h *MetricHistory) GetValues() []float64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.values) == 0 {
-		return ""
-	}
-	blocks := []rune("▁▂▃▄▅▆▇█")
-	result := ""
-	for _, val := range h.values {
-		idx := int(val / 100 * float64(len(blocks)-1))
-		if idx >= len(blocks) {
-			idx = len(blocks) - 1
-		}
-		if idx < 0 {
-			idx = 0
-		}
-		result += string(blocks[idx])
-	}
-	return result
+	out := make([]float64, len(h.values))
+	copy(out, h.values)
+	return out
 }
 
-// GetValues returns a copy of the current values
-func (h *CPUHistory) GetValues() []float64 {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	values := make([]float64, len(h.values))
-	copy(values, h.values)
-	return values
+// GraphWidget is a custom Fyne widget that draws a line graph for a 0–100 metric.
+type GraphWidget struct {
+	widget.BaseWidget
+	values    []float64
+	maxSize   int
+	lineColor color.Color
 }
 
-func statCard(title string, content fyne.CanvasObject, bar *widget.ProgressBar) *fyne.Container {
+func NewGraphWidget(maxSize int, c color.Color) *GraphWidget {
+	g := &GraphWidget{maxSize: maxSize, lineColor: c}
+	g.ExtendBaseWidget(g)
+	return g
+}
+
+// Update replaces the displayed values and triggers a repaint (call on main goroutine).
+func (g *GraphWidget) Update(values []float64) {
+	g.values = make([]float64, len(values))
+	copy(g.values, values)
+	g.Refresh()
+}
+
+func (g *GraphWidget) CreateRenderer() fyne.WidgetRenderer {
+	bg := canvas.NewRectangle(color.NRGBA{R: 18, G: 18, B: 18, A: 255})
+
+	gridColor := color.NRGBA{R: 55, G: 55, B: 55, A: 255}
+	midColor := color.NRGBA{R: 75, G: 75, B: 75, A: 255}
+	grid25 := canvas.NewLine(gridColor)
+	grid50 := canvas.NewLine(midColor)
+	grid75 := canvas.NewLine(gridColor)
+
+	lines := make([]*canvas.Line, g.maxSize-1)
+	for i := range lines {
+		l := canvas.NewLine(g.lineColor)
+		l.StrokeWidth = 1.5
+		l.Hidden = true
+		lines[i] = l
+	}
+
+	objects := make([]fyne.CanvasObject, 0, 4+len(lines))
+	objects = append(objects, bg, grid25, grid50, grid75)
+	for _, l := range lines {
+		objects = append(objects, l)
+	}
+
+	return &graphRenderer{
+		graph:   g,
+		bg:      bg,
+		grid25:  grid25,
+		grid50:  grid50,
+		grid75:  grid75,
+		lines:   lines,
+		objects: objects,
+	}
+}
+
+type graphRenderer struct {
+	graph   *GraphWidget
+	bg      *canvas.Rectangle
+	grid25  *canvas.Line
+	grid50  *canvas.Line
+	grid75  *canvas.Line
+	lines   []*canvas.Line
+	objects []fyne.CanvasObject
+	size    fyne.Size
+}
+
+func (r *graphRenderer) Layout(size fyne.Size) {
+	r.size = size
+	r.bg.Resize(size)
+	r.Refresh()
+}
+
+func (r *graphRenderer) MinSize() fyne.Size { return fyne.NewSize(200, 80) }
+
+func (r *graphRenderer) Refresh() {
+	w, h := r.size.Width, r.size.Height
+
+	setGrid := func(l *canvas.Line, pct float32) {
+		y := h * (1 - pct)
+		l.Position1 = fyne.NewPos(0, y)
+		l.Position2 = fyne.NewPos(w, y)
+		l.Refresh()
+	}
+	setGrid(r.grid25, 0.25)
+	setGrid(r.grid50, 0.50)
+	setGrid(r.grid75, 0.75)
+
+	values := r.graph.values
+	n := len(values)
+	maxPts := r.graph.maxSize
+
+	for i, l := range r.lines {
+		if i >= n-1 {
+			l.Hidden = true
+			l.Refresh()
+			continue
+		}
+		l.Hidden = false
+		x1 := float32(i) / float32(maxPts-1) * w
+		y1 := h - float32(values[i])/100*h
+		x2 := float32(i+1) / float32(maxPts-1) * w
+		y2 := h - float32(values[i+1])/100*h
+		l.Position1 = fyne.NewPos(x1, y1)
+		l.Position2 = fyne.NewPos(x2, y2)
+		l.Refresh()
+	}
+	r.bg.Refresh()
+}
+
+func (r *graphRenderer) Objects() []fyne.CanvasObject { return r.objects }
+func (r *graphRenderer) Destroy()                     {}
+
+func statCard(title string, valueLabel *widget.Label, bar *widget.ProgressBar, graph *GraphWidget) *fyne.Container {
 	return container.NewVBox(
 		widget.NewLabel(title),
-		content,
+		valueLabel,
 		bar,
+		graph,
 		widget.NewSeparator(),
 	)
 }
 
-// containerWithHistory creates a container showing both current value and history
-func containerWithHistory(current *widget.Label, history *widget.Label) *fyne.Container {
-	return container.NewVBox(
-		current,
-		history,
-	)
-}
-
-// main initializes the Fyne application, creates a window, and sets up the UI to display CPU, RAM, and Disk usage. It also starts a goroutine to periodically update these stats every 2 seconds until the window is closed.
 func main() {
 	a := app.New()
 	w := a.NewWindow("Linux Monitor")
-	w.Resize(fyne.NewSize(520, 320))
+	w.Resize(fyne.NewSize(600, 560))
 
 	title := widget.NewLabel("Linux Monitor")
 
 	cpuLabel := widget.NewLabel("lädt...")
-	cpuHistoryLabel := widget.NewLabel("History: -")
 	ramLabel := widget.NewLabel("lädt...")
 	diskLabel := widget.NewLabel("lädt...")
 
@@ -113,12 +187,19 @@ func main() {
 	ramBar := widget.NewProgressBar()
 	diskBar := widget.NewProgressBar()
 
-	cpuHistory := NewCPUHistory(20)
+	const histSize = 60
+	cpuHistory := NewMetricHistory(histSize)
+	ramHistory := NewMetricHistory(histSize)
+	diskHistory := NewMetricHistory(histSize)
+
+	cpuGraph := NewGraphWidget(histSize, color.NRGBA{R: 0, G: 210, B: 100, A: 255})
+	ramGraph := NewGraphWidget(histSize, color.NRGBA{R: 30, G: 150, B: 255, A: 255})
+	diskGraph := NewGraphWidget(histSize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
 
 	grid := container.NewGridWithColumns(1,
-		statCard("CPU", containerWithHistory(cpuLabel, cpuHistoryLabel), cpuBar),
-		statCard("RAM", ramLabel, ramBar),
-		statCard("DISK", diskLabel, diskBar),
+		statCard("CPU", cpuLabel, cpuBar, cpuGraph),
+		statCard("RAM", ramLabel, ramBar, ramGraph),
+		statCard("DISK", diskLabel, diskBar, diskGraph),
 	)
 
 	w.SetContent(container.NewVBox(
@@ -128,10 +209,7 @@ func main() {
 	))
 
 	quit := make(chan struct{})
-
-	w.SetOnClosed(func() {
-		close(quit)
-	})
+	w.SetOnClosed(func() { close(quit) })
 
 	go func() {
 		cpu.Percent(0, false) // warmup: initializes the baseline measurement
@@ -147,12 +225,17 @@ func main() {
 				vmem, _ := mem.VirtualMemory()
 				diskStat, _ := disk.Usage("/")
 
+				if len(cpuPercent) > 0 {
+					cpuHistory.Add(cpuPercent[0])
+				}
+				ramHistory.Add(vmem.UsedPercent)
+				diskHistory.Add(diskStat.UsedPercent)
+
 				fyne.Do(func() {
 					if len(cpuPercent) > 0 {
-						cpuHistory.Add(cpuPercent[0])
 						cpuBar.SetValue(cpuPercent[0] / 100)
 						cpuLabel.SetText(fmt.Sprintf("%.2f%%", cpuPercent[0]))
-						cpuHistoryLabel.SetText("History: " + cpuHistory.GetSparkline())
+						cpuGraph.Update(cpuHistory.GetValues())
 					}
 
 					ramBar.SetValue(vmem.UsedPercent / 100)
@@ -161,6 +244,7 @@ func main() {
 						float64(vmem.Used)/1024/1024/1024,
 						float64(vmem.Total)/1024/1024/1024,
 					))
+					ramGraph.Update(ramHistory.GetValues())
 
 					diskBar.SetValue(diskStat.UsedPercent / 100)
 					diskLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
@@ -168,6 +252,7 @@ func main() {
 						float64(diskStat.Used)/1024/1024/1024,
 						float64(diskStat.Total)/1024/1024/1024,
 					))
+					diskGraph.Update(diskHistory.GetValues())
 				})
 			}
 		}
