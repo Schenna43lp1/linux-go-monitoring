@@ -1,5 +1,6 @@
 //go:build linux
 
+// config.go – zentrale App-Konfiguration: Intervalle, History-Größe, Farben und Schwellenwerte.
 package main
 
 import (

@@ -124,7 +124,25 @@ netDownCard.Graph.Update(h.NetDown.Values())
 
 netUpCard.Value.SetText(formatSpeed(m.UploadBps))
 netUpCard.Graph.Update(h.NetUp.Values())
+
+		if m.GPU.HasGPU {
+			gpuNameLabel.SetText(m.GPU.Name)
+			gpuUtilCard.Status.SetText(statusDot(m.GPU.UtilPercent))
+			gpuUtilCard.Value.SetText(fmt.Sprintf("%.1f%%", m.GPU.UtilPercent))
+			gpuUtilCard.Sub.SetText(fmt.Sprintf("🌡  %.1f °C", m.GPU.Temp))
+			gpuUtilCard.Bar.SetValue(m.GPU.UtilPercent / 100)
+			gpuUtilCard.Graph.Update(h.GPUUtil.Values())
+
+			gpuVRAMCard.Status.SetText(statusDot(m.GPU.VRAMPercent))
+			gpuVRAMCard.Value.SetText(fmt.Sprintf("%.1f%%", m.GPU.VRAMPercent))
+			gpuVRAMCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB", m.GPU.VRAMUsed/1e9, m.GPU.VRAMTotal/1e9))
+			gpuVRAMCard.Bar.SetValue(m.GPU.VRAMPercent / 100)
+			gpuVRAMCard.Graph.Update(h.GPUVRAMPct.Values())
+		} else {
+			gpuNameLabel.SetText("No GPU detected")
+		}
 })
+
 
 w.ShowAndRun()
 }
