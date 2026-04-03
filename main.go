@@ -185,20 +185,21 @@ func (r *graphRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *graphRenderer) Destroy()                     {}
 
 func statCard(title string, valueLabel *widget.Label, bar *widget.ProgressBar, graph *GraphWidget) *fyne.Container {
-	return container.NewVBox(
-		widget.NewLabel(title),
+	return container.NewPadded(container.NewVBox(
+		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		valueLabel,
 		bar,
 		graph,
-		widget.NewSeparator(),
-	)
+	))
 }
 
 func statCardNoBar(title string, labels []fyne.CanvasObject, graph *GraphWidget) *fyne.Container {
-	items := []fyne.CanvasObject{widget.NewLabel(title)}
+	items := []fyne.CanvasObject{
+		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	}
 	items = append(items, labels...)
-	items = append(items, graph, widget.NewSeparator())
-	return container.NewVBox(items...)
+	items = append(items, graph)
+	return container.NewPadded(container.NewVBox(items...))
 }
 
 func formatSpeed(bps float64) string {
@@ -249,10 +250,13 @@ func getCPUTemp() (float64, bool) {
 func main() {
 	a := app.New()
 	w := a.NewWindow("Linux Monitor")
-	w.Resize(fyne.NewSize(620, 780))
+	w.Resize(fyne.NewSize(820, 480))
 
 	uptimeLabel := widget.NewLabel("")
-	header := container.NewHBox(widget.NewLabel("Linux Monitor"), uptimeLabel)
+	header := container.NewBorder(nil, nil,
+		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		uptimeLabel,
+	)
 
 	cpuLabel := widget.NewLabel("lädt...")
 	cpuTempLabel := widget.NewLabel("")
@@ -276,26 +280,25 @@ func main() {
 	diskGraph := NewGraphWidget(histSize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
 	netGraph := NewAutoScaleGraphWidget(histSize, color.NRGBA{R: 220, G: 80, B: 255, A: 255})
 
-	cpuCard := container.NewVBox(
-		widget.NewLabel("CPU"),
+	cpuCard := container.NewPadded(container.NewVBox(
+		widget.NewLabelWithStyle("CPU", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(cpuLabel, cpuTempLabel),
 		cpuBar,
 		cpuGraph,
-		widget.NewSeparator(),
-	)
+	))
 
-	grid := container.NewGridWithColumns(1,
+	grid := container.NewGridWithColumns(2,
 		cpuCard,
 		statCard("RAM", ramLabel, ramBar, ramGraph),
 		statCard("DISK", diskLabel, diskBar, diskGraph),
-		statCardNoBar("NETWORK  (↓ Download)", []fyne.CanvasObject{netUpLabel, netDownLabel}, netGraph),
+		statCardNoBar("NETWORK", []fyne.CanvasObject{netUpLabel, netDownLabel}, netGraph),
 	)
 
-	w.SetContent(container.NewVBox(
+	w.SetContent(container.NewPadded(container.NewVBox(
 		header,
 		widget.NewSeparator(),
 		grid,
-	))
+	)))
 
 	quit := make(chan struct{})
 	w.SetOnClosed(func() { close(quit) })
