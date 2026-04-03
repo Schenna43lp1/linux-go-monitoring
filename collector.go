@@ -139,6 +139,7 @@ func collectDisks() []DiskPartition {
 	return result
 }
 
+func netRate(s *systemCollector) (upload, download float64) {
 ctrs, err := psnet.IOCounters(false)
 if err != nil || len(ctrs) == 0 {
 return
