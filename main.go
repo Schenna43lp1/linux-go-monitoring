@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -263,11 +264,26 @@ func main() {
 
 	tabs := container.NewAppTabs(overviewTab, networkTab, systemTab)
 
-	// ── Header ────────────────────────────────────────────────────────────────
+	// ── Theme Toggle ──────────────────────────────────────────────────────────
+	darkMode := true
+	a.Settings().SetTheme(theme.DarkTheme())
+	themeBtn := widget.NewButton("☀️ Light", func() {})
+	themeBtn.OnTapped = func() {
+		if darkMode {
+			a.Settings().SetTheme(theme.LightTheme())
+			themeBtn.SetText("🌙 Dark")
+		} else {
+			a.Settings().SetTheme(theme.DarkTheme())
+			themeBtn.SetText("☀️ Light")
+		}
+		darkMode = !darkMode
+	}
+
+
 	uptimeLabel := widget.NewLabel("")
 	header := container.NewBorder(nil, nil,
 		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		uptimeLabel,
+		container.NewHBox(uptimeLabel, themeBtn),
 	)
 
 	// ── Alert Banner ──────────────────────────────────────────────────────────
