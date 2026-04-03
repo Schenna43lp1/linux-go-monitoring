@@ -28,7 +28,7 @@ type appConfig struct {
 var cfg = appConfig{
 	Interval:    2 * time.Second,
 	HistorySize: 60,
-	WindowSize:  fyne.NewSize(820, 480),
+	WindowSize:  fyne.NewSize(900, 660),
 }
 
 // ── Metrics ───────────────────────────────────────────────────────────────────
@@ -147,6 +147,7 @@ type Histories struct {
 	RAM     *MetricHistory
 	Disk    *MetricHistory
 	NetDown *MetricHistory
+	NetUp   *MetricHistory
 }
 
 func NewHistories(size int) *Histories {
@@ -155,6 +156,7 @@ func NewHistories(size int) *Histories {
 		RAM:     NewMetricHistory(size),
 		Disk:    NewMetricHistory(size),
 		NetDown: NewMetricHistory(size),
+		NetUp:   NewMetricHistory(size),
 	}
 }
 
@@ -163,6 +165,7 @@ func (h *Histories) Update(m Metrics) {
 	h.RAM.Add(m.RAMPercent)
 	h.Disk.Add(m.DiskPercent)
 	h.NetDown.Add(m.DownloadBps)
+	h.NetUp.Add(m.UploadBps)
 }
 
 // ── Update Loop ───────────────────────────────────────────────────────────────
@@ -213,6 +216,25 @@ func formatUptime(secs uint64) string {
 		return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
 	}
 	return fmt.Sprintf("%dh %dm", hours, minutes)
+}
+
+// SystemInfo holds static system information fetched once at startup.
+type SystemInfo struct {
+	Hostname string
+	OS       string
+	Kernel   string
+}
+
+func getSystemInfo() SystemInfo {
+	info, err := host.Info()
+	if err != nil {
+		return SystemInfo{Hostname: "–", OS: "–", Kernel: "–"}
+	}
+	return SystemInfo{
+		Hostname: info.Hostname,
+		OS:       fmt.Sprintf("%s %s", info.Platform, info.PlatformVersion),
+		Kernel:   info.KernelVersion,
+	}
 }
 
 // getCPUTemp returns the CPU temperature in °C.

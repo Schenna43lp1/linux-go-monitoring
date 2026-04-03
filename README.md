@@ -1,7 +1,6 @@
 # Linux Monitor
 
 > A lightweight Linux system monitor with a native GUI — built with Go, [Fyne](https://fyne.io/) and [gopsutil](https://github.com/shirou/gopsutil).
-
 ---
 
 ## Features
@@ -63,3 +62,5 @@ Config (update interval, history size, window size) is defined centrally at the 
 
 - **[Fyne v2](https://fyne.io/)** — cross-platform GUI toolkit
 - **[gopsutil v3](https://github.com/shirou/gopsutil)** — system stats (CPU, RAM, disk, network, sensors, uptime)
+## License
+This project is licensed under the MIT License.

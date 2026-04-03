@@ -5,6 +5,8 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -12,6 +14,30 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+var (
+	colorCPU     = color.NRGBA{R: 0, G: 210, B: 100, A: 255}
+	colorRAM     = color.NRGBA{R: 30, G: 150, B: 255, A: 255}
+	colorDisk    = color.NRGBA{R: 255, G: 150, B: 0, A: 255}
+	colorNetDown = color.NRGBA{R: 220, G: 80, B: 255, A: 255}
+	colorNetUp   = color.NRGBA{R: 255, G: 100, B: 180, A: 255}
+
+	thresholdWarn = 65.0
+	thresholdCrit = 85.0
+)
+
+func statusDot(pct float64) string {
+	switch {
+	case pct >= thresholdCrit:
+		return "🔴"
+	case pct >= thresholdWarn:
+		return "🟡"
+	default:
+		return "🟢"
+	}
+}
 
 // ── GraphWidget ───────────────────────────────────────────────────────────────
 
@@ -96,7 +122,7 @@ func (r *graphRenderer) Layout(size fyne.Size) {
 	r.Refresh()
 }
 
-func (r *graphRenderer) MinSize() fyne.Size { return fyne.NewSize(200, 80) }
+func (r *graphRenderer) MinSize() fyne.Size { return fyne.NewSize(200, 110) }
 
 func (r *graphRenderer) Refresh() {
 	w, h := r.size.Width, r.size.Height
@@ -146,20 +172,43 @@ func (r *graphRenderer) Refresh() {
 func (r *graphRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *graphRenderer) Destroy()                     {}
 
-// ── UI Helpers ────────────────────────────────────────────────────────────────
+// ── dashCard ──────────────────────────────────────────────────────────────────
 
-// newCard builds a stat card with an optional progress bar (pass nil to omit it).
-// Additional label rows are passed as variadic CanvasObjects.
-func newCard(title string, bar *widget.ProgressBar, graph *GraphWidget, rows ...fyne.CanvasObject) *fyne.Container {
-	items := []fyne.CanvasObject{
+// dashCard holds the mutable widget references for one metric card.
+type dashCard struct {
+	Container *fyne.Container
+	Value     *widget.Label
+	Sub       *widget.Label
+	Status    *widget.Label
+	Bar       *widget.ProgressBar
+	Graph     *GraphWidget
+}
+
+// newDashCard builds a dashboard card.
+// withBar: show a progress bar. autoScale: graph Y-axis auto-scales.
+func newDashCard(title string, graphColor color.Color, withBar bool, autoScale bool) *dashCard {
+	dc := &dashCard{
+		Value:  widget.NewLabelWithStyle("–", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		Sub:    widget.NewLabel(""),
+		Status: widget.NewLabel("🟢"),
+	}
+	if autoScale {
+		dc.Graph = NewAutoScaleGraphWidget(cfg.HistorySize, graphColor)
+	} else {
+		dc.Graph = NewGraphWidget(cfg.HistorySize, graphColor)
+	}
+	header := container.NewBorder(nil, nil,
 		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		dc.Status,
+	)
+	items := []fyne.CanvasObject{header, dc.Value, dc.Sub}
+	if withBar {
+		dc.Bar = widget.NewProgressBar()
+		items = append(items, dc.Bar)
 	}
-	items = append(items, rows...)
-	if bar != nil {
-		items = append(items, bar)
-	}
-	items = append(items, graph)
-	return container.NewPadded(container.NewVBox(items...))
+	items = append(items, dc.Graph)
+	dc.Container = container.NewPadded(container.NewVBox(items...))
+	return dc
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -169,73 +218,138 @@ func main() {
 	w := a.NewWindow("Linux Monitor")
 	w.Resize(cfg.WindowSize)
 
-	// Labels
+	// ── Overview Tab ──────────────────────────────────────────────────────────
+	cpuCard  := newDashCard("🖥  CPU",     colorCPU,     true,  false)
+	ramCard  := newDashCard("🧠  RAM",     colorRAM,     true,  false)
+	diskCard := newDashCard("💾  DISK",    colorDisk,    true,  false)
+	netCard  := newDashCard("🌐  NETWORK", colorNetDown, false, true)
+
+	overviewTab := container.NewTabItem("Overview",
+		container.NewScroll(container.NewGridWithColumns(2,
+			cpuCard.Container,
+			ramCard.Container,
+			diskCard.Container,
+			netCard.Container,
+		)),
+	)
+
+	// ── Network Tab ───────────────────────────────────────────────────────────
+	netDownCard := newDashCard("↓  Download", colorNetDown, false, true)
+	netUpCard   := newDashCard("↑  Upload",   colorNetUp,   false, true)
+
+	networkTab := container.NewTabItem("Network",
+		container.NewScroll(container.NewVBox(
+			netDownCard.Container,
+			netUpCard.Container,
+		)),
+	)
+
+	// ── System Tab ────────────────────────────────────────────────────────────
+	sysInfo        := getSystemInfo()
+	uptimeValLabel := widget.NewLabel("–")
+
+	systemTab := container.NewTabItem("System",
+		container.NewScroll(container.NewPadded(container.NewVBox(
+			widget.NewLabelWithStyle("System Information", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			widget.NewSeparator(),
+			container.NewGridWithColumns(2,
+				widget.NewLabel("Hostname"), widget.NewLabel(sysInfo.Hostname),
+				widget.NewLabel("OS"),       widget.NewLabel(sysInfo.OS),
+				widget.NewLabel("Kernel"),   widget.NewLabel(sysInfo.Kernel),
+				widget.NewLabel("Uptime"),   uptimeValLabel,
+			),
+		))),
+	)
+
+	tabs := container.NewAppTabs(overviewTab, networkTab, systemTab)
+
+	// ── Header ────────────────────────────────────────────────────────────────
 	uptimeLabel := widget.NewLabel("")
-	cpuLabel := widget.NewLabel("lädt...")
-	cpuTempLabel := widget.NewLabel("")
-	ramLabel := widget.NewLabel("lädt...")
-	diskLabel := widget.NewLabel("lädt...")
-	netUpLabel := widget.NewLabel("↑  –")
-	netDownLabel := widget.NewLabel("↓  –")
-
-	// Progress bars
-	cpuBar := widget.NewProgressBar()
-	ramBar := widget.NewProgressBar()
-	diskBar := widget.NewProgressBar()
-
-	// Graphs
-	cpuGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 0, G: 210, B: 100, A: 255})
-	ramGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 30, G: 150, B: 255, A: 255})
-	diskGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
-	netGraph := NewAutoScaleGraphWidget(cfg.HistorySize, color.NRGBA{R: 220, G: 80, B: 255, A: 255})
-
-	// Layout
 	header := container.NewBorder(nil, nil,
 		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		uptimeLabel,
 	)
-	grid := container.NewGridWithColumns(2,
-		newCard("CPU", cpuBar, cpuGraph, container.NewHBox(cpuLabel, cpuTempLabel)),
-		newCard("RAM", ramBar, ramGraph, ramLabel),
-		newCard("DISK", diskBar, diskGraph, diskLabel),
-		newCard("NETWORK", nil, netGraph, netUpLabel, netDownLabel),
-	)
-	w.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), grid)))
 
-	// Wire update loop
+	// ── Alert Banner ──────────────────────────────────────────────────────────
+	alertLabel := widget.NewLabel("")
+
+	// ── Footer ────────────────────────────────────────────────────────────────
+	footerLabel := widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Italic: true})
+
+	w.SetContent(container.NewBorder(
+		container.NewVBox(header, widget.NewSeparator(), alertLabel, widget.NewSeparator()),
+		container.NewVBox(widget.NewSeparator(), footerLabel),
+		nil, nil,
+		tabs,
+	))
+
+	// ── Update Loop ───────────────────────────────────────────────────────────
 	quit := make(chan struct{})
 	w.SetOnClosed(func() { close(quit) })
 
 	go RunUpdateLoop(cfg.Interval, NewMetricsService(), NewHistories(cfg.HistorySize),
 		func(m Metrics, h *Histories) {
+			now := time.Now()
 			uptimeLabel.SetText("  |  Uptime: " + formatUptime(m.Uptime))
+			uptimeValLabel.SetText(formatUptime(m.Uptime))
+			footerLabel.SetText("Last updated: " + now.Format("15:04:05"))
 
-			cpuBar.SetValue(m.CPUPercent / 100)
-			cpuLabel.SetText(fmt.Sprintf("%.2f%%", m.CPUPercent))
-			cpuGraph.Update(h.CPU.GetValues())
-			if m.HasTemp {
-				cpuTempLabel.SetText(fmt.Sprintf("   🌡 %.1f °C", m.CPUTemp))
+			// Alert banner
+			var alerts []string
+			if m.CPUPercent >= thresholdCrit {
+				alerts = append(alerts, fmt.Sprintf("CPU %.0f%%", m.CPUPercent))
+			}
+			if m.RAMPercent >= thresholdCrit {
+				alerts = append(alerts, fmt.Sprintf("RAM %.0f%%", m.RAMPercent))
+			}
+			if m.DiskPercent >= thresholdCrit {
+				alerts = append(alerts, fmt.Sprintf("Disk %.0f%%", m.DiskPercent))
+			}
+			if len(alerts) > 0 {
+				alertLabel.SetText("⚠️  Critical: " + strings.Join(alerts, " · "))
+			} else {
+				alertLabel.SetText("")
 			}
 
-			ramBar.SetValue(m.RAMPercent / 100)
-			ramLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-				m.RAMPercent, m.RAMUsed/1024/1024/1024, m.RAMTotal/1024/1024/1024))
-			ramGraph.Update(h.RAM.GetValues())
+			// CPU card
+			cpuCard.Status.SetText(statusDot(m.CPUPercent))
+			cpuCard.Value.SetText(fmt.Sprintf("%.1f%%", m.CPUPercent))
+			if m.HasTemp {
+				cpuCard.Sub.SetText(fmt.Sprintf("🌡  %.1f °C", m.CPUTemp))
+			}
+			cpuCard.Bar.SetValue(m.CPUPercent / 100)
+			cpuCard.Graph.Update(h.CPU.GetValues())
 
-			diskBar.SetValue(m.DiskPercent / 100)
-			diskLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-				m.DiskPercent, m.DiskUsed/1024/1024/1024, m.DiskTotal/1024/1024/1024))
-			diskGraph.Update(h.Disk.GetValues())
+			// RAM card
+			ramCard.Status.SetText(statusDot(m.RAMPercent))
+			ramCard.Value.SetText(fmt.Sprintf("%.1f%%", m.RAMPercent))
+			ramCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB",
+				m.RAMUsed/1024/1024/1024, m.RAMTotal/1024/1024/1024))
+			ramCard.Bar.SetValue(m.RAMPercent / 100)
+			ramCard.Graph.Update(h.RAM.GetValues())
 
-			netUpLabel.SetText("↑  " + formatSpeed(m.UploadBps))
-			netDownLabel.SetText("↓  " + formatSpeed(m.DownloadBps))
-			netGraph.Update(h.NetDown.GetValues())
+			// Disk card
+			diskCard.Status.SetText(statusDot(m.DiskPercent))
+			diskCard.Value.SetText(fmt.Sprintf("%.1f%%", m.DiskPercent))
+			diskCard.Sub.SetText(fmt.Sprintf("%.1f / %.1f GB",
+				m.DiskUsed/1024/1024/1024, m.DiskTotal/1024/1024/1024))
+			diskCard.Bar.SetValue(m.DiskPercent / 100)
+			diskCard.Graph.Update(h.Disk.GetValues())
+
+			// Network overview card
+			netCard.Value.SetText(fmt.Sprintf("↓  %s", formatSpeed(m.DownloadBps)))
+			netCard.Sub.SetText(fmt.Sprintf("↑  %s", formatSpeed(m.UploadBps)))
+			netCard.Graph.Update(h.NetDown.GetValues())
+
+			// Network detail cards
+			netDownCard.Value.SetText(formatSpeed(m.DownloadBps))
+			netDownCard.Sub.SetText("Download speed (auto-scale)")
+			netDownCard.Graph.Update(h.NetDown.GetValues())
+
+			netUpCard.Value.SetText(formatSpeed(m.UploadBps))
+			netUpCard.Sub.SetText("Upload speed (auto-scale)")
+			netUpCard.Graph.Update(h.NetUp.GetValues())
 		}, quit)
 
 	w.ShowAndRun()
 }
-
-// GraphWidget draws a line graph.
-// When autoScale is true the Y-axis adapts to the current max value in the window;
-// otherwise values are assumed to be in the range 0–100.
-// Values are added to the end of the list, pushing out old values when maxSize is exceeded.
