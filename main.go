@@ -17,12 +17,14 @@ import (
 )
 
 func main() {
-a := app.New()
-a.Settings().SetTheme(theme.DarkTheme())
-w := a.NewWindow("Linux Monitor")
-w.Resize(cfg.WindowSize)
+	a := app.New()
+	a.Settings().SetTheme(theme.DarkTheme())
+	w := a.NewWindow("Linux Monitor")
+	w.Resize(cfg.WindowSize)
 
-cpuCard     := newDashCard("🖥  CPU",     colorCPU,     true,  false)
+	loadColorConfig()
+
+	cpuCard     := newDashCard("🖥  CPU",     colorCPU,     true,  false)
 ramCard     := newDashCard("🧠  RAM",     colorRAM,     true,  false)
 diskCard    := newDashCard("💾  DISK",    colorDisk,    true,  false)
 netCard     := newDashCard("🌐  NETWORK", colorNetDown, false, true)
@@ -46,23 +48,37 @@ systemTab,
 		buildGPUTab(gpuUtilCard, gpuVRAMCard, gpuNameLabel),
 	)
 
-uptimeLabel := widget.NewLabel("")
-darkMode := true
-themeBtn := widget.NewButton("☀️ Light", nil)
-themeBtn.OnTapped = func() {
-if darkMode {
-a.Settings().SetTheme(theme.LightTheme())
-themeBtn.SetText("🌙 Dark")
-} else {
-a.Settings().SetTheme(theme.DarkTheme())
-themeBtn.SetText("☀️ Light")
-}
-darkMode = !darkMode
-}
-header := container.NewBorder(nil, nil,
-widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-container.NewHBox(uptimeLabel, themeBtn),
-)
+	uptimeLabel := widget.NewLabel("")
+	darkMode := true
+	themeBtn := widget.NewButton("☀️ Light", nil)
+	themeBtn.OnTapped = func() {
+		if darkMode {
+			a.Settings().SetTheme(theme.LightTheme())
+			themeBtn.SetText("🌙 Dark")
+		} else {
+			a.Settings().SetTheme(theme.DarkTheme())
+			themeBtn.SetText("☀️ Light")
+		}
+		darkMode = !darkMode
+	}
+
+	colorEntries := []colorEntry{
+		{"CPU",      &colorCPU,     []*GraphWidget{cpuCard.Graph}},
+		{"RAM",      &colorRAM,     []*GraphWidget{ramCard.Graph}},
+		{"Disk",     &colorDisk,    []*GraphWidget{diskCard.Graph}},
+		{"Download", &colorNetDown, []*GraphWidget{netCard.Graph, netDownCard.Graph}},
+		{"Upload",   &colorNetUp,   []*GraphWidget{netUpCard.Graph}},
+		{"GPU",      &colorGPU,     []*GraphWidget{gpuUtilCard.Graph}},
+		{"VRAM",     &colorVRAM,    []*GraphWidget{gpuVRAMCard.Graph}},
+	}
+	settingsBtn := widget.NewButton("⚙", func() {
+		showSettingsDialog(w, colorEntries)
+	})
+
+	header := container.NewBorder(nil, nil,
+		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		container.NewHBox(uptimeLabel, themeBtn, settingsBtn),
+	)
 
 alertLabel  := widget.NewLabel("")
 footerLabel := widget.NewLabelWithStyle("", fyne.TextAlignTrailing, fyne.TextStyle{Italic: true})

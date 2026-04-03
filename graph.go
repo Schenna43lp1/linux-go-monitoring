@@ -34,6 +34,13 @@ g.ExtendBaseWidget(g)
 return g
 }
 
+// SetColor updates the graph line color and triggers a repaint.
+// Safe to call on the Fyne main goroutine at any time.
+func (g *GraphWidget) SetColor(c color.Color) {
+	g.lineColor = c
+	g.Refresh()
+}
+
 // Update replaces the displayed values and triggers a repaint (must be called on the main goroutine).
 func (g *GraphWidget) Update(values []float64) {
 g.values = make([]float64, len(values))
@@ -95,9 +102,14 @@ r.Refresh()
 func (r *graphRenderer) MinSize() fyne.Size { return fyne.NewSize(200, 110) }
 
 func (r *graphRenderer) Refresh() {
-w, h := r.size.Width, r.size.Height
+	w, h := r.size.Width, r.size.Height
 
-values := r.graph.values
+	// Sync line color in case it was changed via SetColor.
+	for _, l := range r.lines {
+		l.StrokeColor = r.graph.lineColor
+	}
+
+	values := r.graph.values
 maxVal := 100.0
 if r.graph.autoScale {
 maxVal = 1.0
