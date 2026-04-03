@@ -59,6 +59,7 @@ m.DiskPercent = d.UsedPercent
 m.DiskUsed = float64(d.Used)
 m.DiskTotal = float64(d.Total)
 }
+m.Disks = collectDisks()
 
 m.Uptime, _ = host.Uptime()
 	m.GPU = gpuInfo()
@@ -99,6 +100,43 @@ maxTemp = t.Temperature
 }
 }
 return maxTemp, true
+}
+
+func collectDisks() []DiskPartition {
+	parts, err := disk.Partitions(false)
+	if err != nil {
+		return nil
+	}
+	// filesystems to skip (virtual/pseudo)
+	skipFS := map[string]bool{
+		"tmpfs": true, "devtmpfs": true, "devfs": true, "overlay": true,
+		"aufs": true, "squashfs": true, "proc": true, "sysfs": true,
+		"cgroup": true, "cgroup2": true, "pstore": true, "securityfs": true,
+		"debugfs": true, "hugetlbfs": true, "mqueue": true, "fusectl": true,
+		"efivarfs": true, "bpf": true, "tracefs": true,
+	}
+	var result []DiskPartition
+	for _, p := range parts {
+		if skipFS[p.Fstype] {
+			continue
+		}
+		mp := p.Mountpoint
+		if strings.HasPrefix(mp, "/sys") || strings.HasPrefix(mp, "/proc") ||
+			strings.HasPrefix(mp, "/dev") || strings.HasPrefix(mp, "/run") {
+			continue
+		}
+		usage, err := disk.Usage(mp)
+		if err != nil || usage.Total == 0 {
+			continue
+		}
+		result = append(result, DiskPartition{
+			Mount:   mp,
+			Percent: usage.UsedPercent,
+			Used:    float64(usage.Used),
+			Total:   float64(usage.Total),
+		})
+	}
+	return result
 }
 
 func netRate(s *systemCollector) (upload, download float64) {

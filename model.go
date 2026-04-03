@@ -14,11 +14,20 @@ RAMTotal    float64
 DiskPercent float64
 DiskUsed    float64
 DiskTotal   float64
+Disks       []DiskPartition
 UploadBps   float64
 DownloadBps float64
 Uptime      uint64
 GPU         GPUInfo
 Err         error
+}
+
+// DiskPartition holds usage data for a single mounted filesystem.
+type DiskPartition struct {
+Mount   string
+Percent float64
+Used    float64
+Total   float64
 }
 
 // GPUInfo holds GPU utilization and VRAM data for one GPU.
