@@ -35,7 +35,7 @@
 ### Run directly
 
 ```bash
-go run main.go
+go run .
 ```
 
 ### Build & install
@@ -45,6 +45,17 @@ sudo ./instrall.sh
 ```
 
 Compiles the binary, installs it to `/usr/local/bin`, and creates a `.desktop` entry.
+
+---
+
+## Project structure
+
+```
+main.go      — UI: GraphWidget, layout, main()
+update.go    — Logic: Config, MetricsService, Histories, RunUpdateLoop
+```
+
+Config (update interval, history size, window size) is defined centrally at the top of `update.go`.
 
 ---
 
