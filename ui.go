@@ -1,5 +1,6 @@
 //go:build linux
 
+// ui.go – baut alle Tabs (Overview, Network, System, GPU) und das Hauptfenster der Fyne-App.
 package main
 
 import (

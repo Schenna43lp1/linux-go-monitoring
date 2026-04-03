@@ -1,5 +1,6 @@
 //go:build linux
 
+// model.go – Datenstrukturen für alle Metriken (CPU, RAM, Disk, Network, GPU, System).
 package main
 
 // Metrics is a snapshot of all system metrics.

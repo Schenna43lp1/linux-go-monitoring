@@ -1,5 +1,6 @@
 //go:build linux
 
+// loop.go – Polling-Loop: ruft den Collector im konfigurierten Intervall auf und benachrichtigt die UI.
 package main
 
 import (

@@ -1,5 +1,6 @@
 //go:build linux
 
+// collector.go – sammelt Systemmetriken via gopsutil, nvidia-smi und sysfs (Collector-Interface + Implementierung).
 package main
 
 import (

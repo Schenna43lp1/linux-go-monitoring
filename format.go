@@ -1,5 +1,6 @@
 //go:build linux
 
+// format.go – Hilfsfunktionen zum Formatieren von Werten (Geschwindigkeit, Uptime, Status-Icons).
 package main
 
 import "fmt"

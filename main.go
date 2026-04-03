@@ -1,5 +1,6 @@
 //go:build linux
 
+// main.go – Einstiegspunkt: initialisiert App, verdrahtet alle Komponenten und startet den Update-Loop.
 package main
 
 import (

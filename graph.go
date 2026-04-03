@@ -1,5 +1,6 @@
 //go:build linux
 
+// graph.go – benutzerdefiniertes Fyne-Widget für Echtzeit-Liniengraphen mit optionaler Auto-Skalierung.
 package main
 
 import (

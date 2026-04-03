@@ -1,5 +1,6 @@
 //go:build linux
 
+// card.go – dashCard-Komponente: vereinheitlichte UI-Karte mit Titel, Wert, Progressbar und Graph.
 package main
 
 import (

@@ -1,5 +1,6 @@
 //go:build linux
 
+// history.go – thread-sicherer rollierender Puffer (MetricHistory) und gebündelte Histories für alle Metriken.
 package main
 
 import "sync"
