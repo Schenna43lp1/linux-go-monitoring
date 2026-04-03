@@ -128,6 +128,8 @@ netDownCard.Graph.Update(h.NetDown.Values())
 netUpCard.Value.SetText(formatSpeed(m.UploadBps))
 netUpCard.Graph.Update(h.NetUp.Values())
 
+updateDiskTab(diskVBox, m.Disks)
+
 		if m.GPU.HasGPU {
 			gpuNameLabel.SetText(m.GPU.Name)
 			gpuUtilCard.Status.SetText(statusDot(m.GPU.UtilPercent))
