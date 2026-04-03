@@ -10,6 +10,7 @@ package main
 // This code is intended for Linux systems and may not work correctly on other operating systems due to differences in how system statistics are accessed and displayed.
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -22,13 +23,76 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-// statCard creates a container with a title, label, progress bar, and separator.
-func statCard(title string, label *widget.Label, bar *widget.ProgressBar) *fyne.Container {
+// CPUHistory stores historical CPU load values
+type CPUHistory struct {
+	mu      sync.Mutex
+	values  []float64
+	maxSize int
+}
+
+// NewCPUHistory creates a new CPU history tracker
+func NewCPUHistory(maxSize int) *CPUHistory {
+	return &CPUHistory{
+		values:  make([]float64, 0, maxSize),
+		maxSize: maxSize,
+	}
+}
+
+// Add adds a new CPU value to history
+func (h *CPUHistory) Add(value float64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.values = append(h.values, value)
+	if len(h.values) > h.maxSize {
+		h.values = h.values[1:]
+	}
+}
+
+// GetSparkline returns a sparkline representation of CPU history
+func (h *CPUHistory) GetSparkline() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.values) == 0 {
+		return ""
+	}
+	sparkline := "▁▂▃▄▅▆▇█"
+	result := ""
+	for _, val := range h.values {
+		idx := int(val / 100 * float64(len(sparkline)-1))
+		if idx >= len(sparkline) {
+			idx = len(sparkline) - 1
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		result += string(sparkline[idx])
+	}
+	return result
+}
+
+// GetValues returns a copy of the current values
+func (h *CPUHistory) GetValues() []float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	values := make([]float64, len(h.values))
+	copy(values, h.values)
+	return values
+}
+
+func statCard(title string, content fyne.CanvasObject, bar *widget.ProgressBar) *fyne.Container {
 	return container.NewVBox(
 		widget.NewLabel(title),
-		label,
+		content,
 		bar,
 		widget.NewSeparator(),
+	)
+}
+
+// containerWithHistory creates a container showing both current value and history
+func containerWithHistory(current *widget.Label, history *widget.Label) *fyne.Container {
+	return container.NewVBox(
+		current,
+		history,
 	)
 }
 
@@ -41,6 +105,7 @@ func main() {
 	title := widget.NewLabel("Linux Monitor")
 
 	cpuLabel := widget.NewLabel("lädt...")
+	cpuHistoryLabel := widget.NewLabel("History: -")
 	ramLabel := widget.NewLabel("lädt...")
 	diskLabel := widget.NewLabel("lädt...")
 
@@ -48,8 +113,10 @@ func main() {
 	ramBar := widget.NewProgressBar()
 	diskBar := widget.NewProgressBar()
 
+	cpuHistory := NewCPUHistory(20)
+
 	grid := container.NewGridWithColumns(1,
-		statCard("CPU", cpuLabel, cpuBar),
+		statCard("CPU", containerWithHistory(cpuLabel, cpuHistoryLabel), cpuBar),
 		statCard("RAM", ramLabel, ramBar),
 		statCard("DISK", diskLabel, diskBar),
 	)
@@ -81,8 +148,10 @@ func main() {
 
 				fyne.Do(func() {
 					if len(cpuPercent) > 0 {
+						cpuHistory.Add(cpuPercent[0])
 						cpuBar.SetValue(cpuPercent[0] / 100)
 						cpuLabel.SetText(fmt.Sprintf("%.2f%%", cpuPercent[0]))
+						cpuHistoryLabel.SetText("History: " + cpuHistory.GetSparkline())
 					}
 
 					ramBar.SetValue(vmem.UsedPercent / 100)
