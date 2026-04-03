@@ -134,6 +134,7 @@ func main() {
 	})
 
 	go func() {
+		cpu.Percent(0, false) // warmup: initializes the baseline measurement
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
