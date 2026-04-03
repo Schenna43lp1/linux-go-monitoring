@@ -55,17 +55,17 @@ func (h *CPUHistory) GetSparkline() string {
 	if len(h.values) == 0 {
 		return ""
 	}
-	sparkline := "▁▂▃▄▅▆▇█"
+	blocks := []rune("▁▂▃▄▅▆▇█")
 	result := ""
 	for _, val := range h.values {
-		idx := int(val / 100 * float64(len(sparkline)-1))
-		if idx >= len(sparkline) {
-			idx = len(sparkline) - 1
+		idx := int(val / 100 * float64(len(blocks)-1))
+		if idx >= len(blocks) {
+			idx = len(blocks) - 1
 		}
 		if idx < 0 {
 			idx = 0
 		}
-		result += string(sparkline[idx])
+		result += string(blocks[idx])
 	}
 	return result
 }
