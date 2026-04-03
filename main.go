@@ -22,6 +22,148 @@ import (
 	psnet "github.com/shirou/gopsutil/v3/net"
 )
 
+// ── Config ───────────────────────────────────────────────────────────────────
+
+type appConfig struct {
+	Interval    time.Duration
+	HistorySize int
+	WindowSize  fyne.Size
+}
+
+var cfg = appConfig{
+	Interval:    2 * time.Second,
+	HistorySize: 60,
+	WindowSize:  fyne.NewSize(820, 480),
+}
+
+// ── Metrics (Service Layer) ───────────────────────────────────────────────────
+
+// Metrics is a single snapshot of all system metrics.
+type Metrics struct {
+	CPUPercent  float64
+	CPUTemp     float64
+	HasTemp     bool
+	RAMPercent  float64
+	RAMUsed     float64 // bytes
+	RAMTotal    float64 // bytes
+	DiskPercent float64
+	DiskUsed    float64 // bytes
+	DiskTotal   float64 // bytes
+	UploadBps   float64
+	DownloadBps float64
+	Uptime      uint64 // seconds
+}
+
+// MetricsService collects system metrics. It keeps track of network counters
+// between calls to compute upload/download speeds.
+type MetricsService struct {
+	prevSent    uint64
+	prevRecv    uint64
+	prevNetTime time.Time
+}
+
+func NewMetricsService() *MetricsService {
+	svc := &MetricsService{}
+	if ctrs, err := psnet.IOCounters(false); err == nil && len(ctrs) > 0 {
+		svc.prevSent = ctrs[0].BytesSent
+		svc.prevRecv = ctrs[0].BytesRecv
+		svc.prevNetTime = time.Now()
+	}
+	return svc
+}
+
+// Collect samples all metrics and returns a Metrics snapshot.
+func (s *MetricsService) Collect() Metrics {
+	var m Metrics
+
+	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
+		m.CPUPercent = pct[0]
+	}
+	m.CPUTemp, m.HasTemp = getCPUTemp()
+
+	if vmem, err := mem.VirtualMemory(); err == nil {
+		m.RAMPercent = vmem.UsedPercent
+		m.RAMUsed = float64(vmem.Used)
+		m.RAMTotal = float64(vmem.Total)
+	}
+
+	if d, err := disk.Usage("/"); err == nil {
+		m.DiskPercent = d.UsedPercent
+		m.DiskUsed = float64(d.Used)
+		m.DiskTotal = float64(d.Total)
+	}
+
+	m.Uptime, _ = host.Uptime()
+
+	if ctrs, err := psnet.IOCounters(false); err == nil && len(ctrs) > 0 {
+		now := time.Now()
+		if dt := now.Sub(s.prevNetTime).Seconds(); dt > 0 {
+			m.UploadBps = float64(ctrs[0].BytesSent-s.prevSent) / dt
+			m.DownloadBps = float64(ctrs[0].BytesRecv-s.prevRecv) / dt
+		}
+		s.prevSent = ctrs[0].BytesSent
+		s.prevRecv = ctrs[0].BytesRecv
+		s.prevNetTime = now
+	}
+
+	return m
+}
+
+// ── Histories ────────────────────────────────────────────────────────────────
+
+// Histories bundles the rolling-window histories for every metric.
+type Histories struct {
+	CPU     *MetricHistory
+	RAM     *MetricHistory
+	Disk    *MetricHistory
+	NetDown *MetricHistory
+}
+
+func NewHistories(size int) *Histories {
+	return &Histories{
+		CPU:     NewMetricHistory(size),
+		RAM:     NewMetricHistory(size),
+		Disk:    NewMetricHistory(size),
+		NetDown: NewMetricHistory(size),
+	}
+}
+
+func (h *Histories) Update(m Metrics) {
+	h.CPU.Add(m.CPUPercent)
+	h.RAM.Add(m.RAMPercent)
+	h.Disk.Add(m.DiskPercent)
+	h.NetDown.Add(m.DownloadBps)
+}
+
+// ── Update Loop ───────────────────────────────────────────────────────────────
+
+// RunUpdateLoop runs in a goroutine: collects metrics every interval,
+// updates histories, then calls onUpdate on the Fyne main goroutine.
+func RunUpdateLoop(
+	interval time.Duration,
+	svc *MetricsService,
+	h *Histories,
+	onUpdate func(Metrics, *Histories),
+	quit <-chan struct{},
+) {
+	cpu.Percent(0, false) // warmup: initialises the baseline for the first measurement
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-quit:
+			return
+		case <-ticker.C:
+			m := svc.Collect()
+			h.Update(m)
+			fyne.Do(func() { onUpdate(m, h) })
+		}
+	}
+}
+
+// ── MetricHistory ─────────────────────────────────────────────────────────────
+
 // MetricHistory stores a rolling window of metric values.
 type MetricHistory struct {
 	mu      sync.Mutex
@@ -52,6 +194,8 @@ func (h *MetricHistory) GetValues() []float64 {
 	copy(out, h.values)
 	return out
 }
+
+// ── GraphWidget ───────────────────────────────────────────────────────────────
 
 // GraphWidget draws a line graph.
 // When autoScale is true the Y-axis adapts to the current max value in the window;
@@ -184,20 +328,18 @@ func (r *graphRenderer) Refresh() {
 func (r *graphRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *graphRenderer) Destroy()                     {}
 
-func statCard(title string, valueLabel *widget.Label, bar *widget.ProgressBar, graph *GraphWidget) *fyne.Container {
-	return container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		valueLabel,
-		bar,
-		graph,
-	))
-}
+// ── UI Helpers ────────────────────────────────────────────────────────────────
 
-func statCardNoBar(title string, labels []fyne.CanvasObject, graph *GraphWidget) *fyne.Container {
+// newCard builds a stat card with an optional progress bar (pass nil to omit it).
+// Additional label rows are passed as variadic CanvasObjects.
+func newCard(title string, bar *widget.ProgressBar, graph *GraphWidget, rows ...fyne.CanvasObject) *fyne.Container {
 	items := []fyne.CanvasObject{
 		widget.NewLabelWithStyle(title, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 	}
-	items = append(items, labels...)
+	items = append(items, rows...)
+	if bar != nil {
+		items = append(items, bar)
+	}
 	items = append(items, graph)
 	return container.NewPadded(container.NewVBox(items...))
 }
@@ -247,17 +389,15 @@ func getCPUTemp() (float64, bool) {
 	return max, true
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 func main() {
 	a := app.New()
 	w := a.NewWindow("Linux Monitor")
-	w.Resize(fyne.NewSize(820, 480))
+	w.Resize(cfg.WindowSize)
 
+	// Labels
 	uptimeLabel := widget.NewLabel("")
-	header := container.NewBorder(nil, nil,
-		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		uptimeLabel,
-	)
-
 	cpuLabel := widget.NewLabel("lädt...")
 	cpuTempLabel := widget.NewLabel("")
 	ramLabel := widget.NewLabel("lädt...")
@@ -265,125 +405,59 @@ func main() {
 	netUpLabel := widget.NewLabel("↑  –")
 	netDownLabel := widget.NewLabel("↓  –")
 
+	// Progress bars
 	cpuBar := widget.NewProgressBar()
 	ramBar := widget.NewProgressBar()
 	diskBar := widget.NewProgressBar()
 
-	const histSize = 60
-	cpuHistory := NewMetricHistory(histSize)
-	ramHistory := NewMetricHistory(histSize)
-	diskHistory := NewMetricHistory(histSize)
-	netDownHistory := NewMetricHistory(histSize)
+	// Graphs
+	cpuGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 0, G: 210, B: 100, A: 255})
+	ramGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 30, G: 150, B: 255, A: 255})
+	diskGraph := NewGraphWidget(cfg.HistorySize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
+	netGraph := NewAutoScaleGraphWidget(cfg.HistorySize, color.NRGBA{R: 220, G: 80, B: 255, A: 255})
 
-	cpuGraph := NewGraphWidget(histSize, color.NRGBA{R: 0, G: 210, B: 100, A: 255})
-	ramGraph := NewGraphWidget(histSize, color.NRGBA{R: 30, G: 150, B: 255, A: 255})
-	diskGraph := NewGraphWidget(histSize, color.NRGBA{R: 255, G: 150, B: 0, A: 255})
-	netGraph := NewAutoScaleGraphWidget(histSize, color.NRGBA{R: 220, G: 80, B: 255, A: 255})
-
-	cpuCard := container.NewPadded(container.NewVBox(
-		widget.NewLabelWithStyle("CPU", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewHBox(cpuLabel, cpuTempLabel),
-		cpuBar,
-		cpuGraph,
-	))
-
-	grid := container.NewGridWithColumns(2,
-		cpuCard,
-		statCard("RAM", ramLabel, ramBar, ramGraph),
-		statCard("DISK", diskLabel, diskBar, diskGraph),
-		statCardNoBar("NETWORK", []fyne.CanvasObject{netUpLabel, netDownLabel}, netGraph),
+	// Layout
+	header := container.NewBorder(nil, nil,
+		widget.NewLabelWithStyle("🖥  Linux Monitor", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		uptimeLabel,
 	)
+	grid := container.NewGridWithColumns(2,
+		newCard("CPU", cpuBar, cpuGraph, container.NewHBox(cpuLabel, cpuTempLabel)),
+		newCard("RAM", ramBar, ramGraph, ramLabel),
+		newCard("DISK", diskBar, diskGraph, diskLabel),
+		newCard("NETWORK", nil, netGraph, netUpLabel, netDownLabel),
+	)
+	w.SetContent(container.NewPadded(container.NewVBox(header, widget.NewSeparator(), grid)))
 
-	w.SetContent(container.NewPadded(container.NewVBox(
-		header,
-		widget.NewSeparator(),
-		grid,
-	)))
-
+	// Update loop
 	quit := make(chan struct{})
 	w.SetOnClosed(func() { close(quit) })
 
-	// Seed initial network counters
-	var prevSent, prevRecv uint64
-	var prevNetTime time.Time
-	if ctrs, err := psnet.IOCounters(false); err == nil && len(ctrs) > 0 {
-		prevSent = ctrs[0].BytesSent
-		prevRecv = ctrs[0].BytesRecv
-		prevNetTime = time.Now()
-	}
+	go RunUpdateLoop(cfg.Interval, NewMetricsService(), NewHistories(cfg.HistorySize),
+		func(m Metrics, h *Histories) {
+			uptimeLabel.SetText("  |  Uptime: " + formatUptime(m.Uptime))
 
-	go func() {
-		cpu.Percent(0, false) // warmup: initializes the baseline measurement
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-quit:
-				return
-			case <-ticker.C:
-				cpuPercent, _ := cpu.Percent(0, false)
-				vmem, _ := mem.VirtualMemory()
-				diskStat, _ := disk.Usage("/")
-				uptime, _ := host.Uptime()
-				cpuTemp, hasTemp := getCPUTemp()
-
-				var uploadBps, downloadBps float64
-				if ctrs, err := psnet.IOCounters(false); err == nil && len(ctrs) > 0 {
-					now := time.Now()
-					dt := now.Sub(prevNetTime).Seconds()
-					if dt > 0 {
-						uploadBps = float64(ctrs[0].BytesSent-prevSent) / dt
-						downloadBps = float64(ctrs[0].BytesRecv-prevRecv) / dt
-					}
-					prevSent = ctrs[0].BytesSent
-					prevRecv = ctrs[0].BytesRecv
-					prevNetTime = now
-				}
-
-				if len(cpuPercent) > 0 {
-					cpuHistory.Add(cpuPercent[0])
-				}
-				ramHistory.Add(vmem.UsedPercent)
-				diskHistory.Add(diskStat.UsedPercent)
-				netDownHistory.Add(downloadBps)
-
-				fyne.Do(func() {
-					uptimeLabel.SetText("  |  Uptime: " + formatUptime(uptime))
-
-					if len(cpuPercent) > 0 {
-						cpuBar.SetValue(cpuPercent[0] / 100)
-						cpuLabel.SetText(fmt.Sprintf("%.2f%%", cpuPercent[0]))
-						cpuGraph.Update(cpuHistory.GetValues())
-					}
-					if hasTemp {
-						cpuTempLabel.SetText(fmt.Sprintf("   🌡 %.1f °C", cpuTemp))
-					}
-
-					ramBar.SetValue(vmem.UsedPercent / 100)
-					ramLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-						vmem.UsedPercent,
-						float64(vmem.Used)/1024/1024/1024,
-						float64(vmem.Total)/1024/1024/1024,
-					))
-					ramGraph.Update(ramHistory.GetValues())
-
-					diskBar.SetValue(diskStat.UsedPercent / 100)
-					diskLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
-						diskStat.UsedPercent,
-						float64(diskStat.Used)/1024/1024/1024,
-						float64(diskStat.Total)/1024/1024/1024,
-					))
-					diskGraph.Update(diskHistory.GetValues())
-
-					netUpLabel.SetText("↑  " + formatSpeed(uploadBps))
-					netDownLabel.SetText("↓  " + formatSpeed(downloadBps))
-					netGraph.Update(netDownHistory.GetValues())
-				})
+			cpuBar.SetValue(m.CPUPercent / 100)
+			cpuLabel.SetText(fmt.Sprintf("%.2f%%", m.CPUPercent))
+			cpuGraph.Update(h.CPU.GetValues())
+			if m.HasTemp {
+				cpuTempLabel.SetText(fmt.Sprintf("   🌡 %.1f °C", m.CPUTemp))
 			}
-		}
-	}()
+
+			ramBar.SetValue(m.RAMPercent / 100)
+			ramLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
+				m.RAMPercent, m.RAMUsed/1024/1024/1024, m.RAMTotal/1024/1024/1024))
+			ramGraph.Update(h.RAM.GetValues())
+
+			diskBar.SetValue(m.DiskPercent / 100)
+			diskLabel.SetText(fmt.Sprintf("%.2f%%  (%.1f / %.1f GB)",
+				m.DiskPercent, m.DiskUsed/1024/1024/1024, m.DiskTotal/1024/1024/1024))
+			diskGraph.Update(h.Disk.GetValues())
+
+			netUpLabel.SetText("↑  " + formatSpeed(m.UploadBps))
+			netDownLabel.SetText("↓  " + formatSpeed(m.DownloadBps))
+			netGraph.Update(h.NetDown.GetValues())
+		}, quit)
 
 	w.ShowAndRun()
 }
-
