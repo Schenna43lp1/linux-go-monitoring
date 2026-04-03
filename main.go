@@ -28,6 +28,10 @@ netCard     := newDashCard("🌐  NETWORK", colorNetDown, false, true)
 netDownCard := newDashCard("↓  Download", colorNetDown, false, true)
 netUpCard   := newDashCard("↑  Upload",   colorNetUp,   false, true)
 
+gpuUtilCard := newDashCard("🎮  GPU Utilization", colorGPU,  true,  false)
+gpuVRAMCard := newDashCard("💠  VRAM",            colorVRAM, true,  false)
+gpuNameLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
+
 collector               := newCollector()
 sysInfoData             := collector.SystemInfo()
 systemTab, uptimeValLabel := buildSystemTab(sysInfoData)
@@ -36,7 +40,8 @@ tabs := container.NewAppTabs(
 buildOverviewTab(cpuCard, ramCard, diskCard, netCard),
 buildNetworkTab(netDownCard, netUpCard),
 systemTab,
-)
+		buildGPUTab(gpuUtilCard, gpuVRAMCard, gpuNameLabel),
+	)
 
 uptimeLabel := widget.NewLabel("")
 darkMode := true

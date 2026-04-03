@@ -33,3 +33,6 @@ const (
 thresholdWarn = 65.0
 thresholdCrit = 85.0
 )
+
+var colorGPU = color.NRGBA{R: 255, G: 60, B: 60, A: 255}
+var colorVRAM = color.NRGBA{R: 255, G: 200, B: 0, A: 255}

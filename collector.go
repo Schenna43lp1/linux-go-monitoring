@@ -4,6 +4,8 @@ package main
 
 import (
 "fmt"
+	"os"
+	"os/exec"
 "strings"
 "time"
 
@@ -58,6 +60,7 @@ m.DiskTotal = float64(d.Total)
 }
 
 m.Uptime, _ = host.Uptime()
+	m.GPU = gpuInfo()
 m.UploadBps, m.DownloadBps = netRate(s)
 
 return m
@@ -111,4 +114,85 @@ s.prevSent = ctrs[0].BytesSent
 s.prevRecv = ctrs[0].BytesRecv
 s.prevNetTime = now
 return
+}
+
+// gpuInfo tries NVIDIA first (nvidia-smi), then AMD sysfs.
+func gpuInfo() GPUInfo {
+if g, ok := nvidiaSMI(); ok {
+return g
+}
+if g, ok := amdSysfs(); ok {
+return g
+}
+return GPUInfo{}
+}
+
+func nvidiaSMI() (GPUInfo, bool) {
+out, err := exec.Command("nvidia-smi",
+"--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+"--format=csv,noheader,nounits").Output()
+if err != nil {
+return GPUInfo{}, false
+}
+parts := strings.SplitN(strings.TrimSpace(string(out)), ",", 5)
+if len(parts) < 5 {
+return GPUInfo{}, false
+}
+parse := func(s string) float64 {
+var f float64
+fmt.Sscanf(strings.TrimSpace(s), "%f", &f)
+return f
+}
+vramUsed := parse(parts[2]) * 1024 * 1024
+vramTotal := parse(parts[3]) * 1024 * 1024
+vramPct := 0.0
+if vramTotal > 0 {
+vramPct = vramUsed / vramTotal * 100
+}
+return GPUInfo{
+Name:        strings.TrimSpace(parts[0]),
+UtilPercent: parse(parts[1]),
+VRAMUsed:    vramUsed,
+VRAMTotal:   vramTotal,
+VRAMPercent: vramPct,
+Temp:        parse(parts[4]),
+HasGPU:      true,
+}, true
+}
+
+func amdSysfs() (GPUInfo, bool) {
+utilBytes, err := os.ReadFile("/sys/class/drm/card0/device/gpu_busy_percent")
+if err != nil {
+return GPUInfo{}, false
+}
+var util float64
+fmt.Sscanf(strings.TrimSpace(string(utilBytes)), "%f", &util)
+
+var vramUsed, vramTotal float64
+if b, err := os.ReadFile("/sys/class/drm/card0/device/mem_info_vram_used"); err == nil {
+fmt.Sscanf(strings.TrimSpace(string(b)), "%f", &vramUsed)
+}
+if b, err := os.ReadFile("/sys/class/drm/card0/device/mem_info_vram_total"); err == nil {
+fmt.Sscanf(strings.TrimSpace(string(b)), "%f", &vramTotal)
+}
+vramPct := 0.0
+if vramTotal > 0 {
+vramPct = vramUsed / vramTotal * 100
+}
+
+var temp float64
+if b, err := os.ReadFile("/sys/class/drm/card0/device/hwmon/hwmon0/temp1_input"); err == nil {
+fmt.Sscanf(strings.TrimSpace(string(b)), "%f", &temp)
+temp /= 1000
+}
+
+return GPUInfo{
+Name:        "AMD GPU",
+UtilPercent: util,
+VRAMUsed:    vramUsed,
+VRAMTotal:   vramTotal,
+VRAMPercent: vramPct,
+Temp:        temp,
+HasGPU:      true,
+}, true
 }

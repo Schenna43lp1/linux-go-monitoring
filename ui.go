@@ -48,3 +48,14 @@ widget.NewLabel("Uptime"),   uptimeValLabel,
 )
 return tab, uptimeValLabel
 }
+
+// buildGPUTab creates the GPU tab with utilization and VRAM cards.
+func buildGPUTab(util, vram *dashCard, nameLabel *widget.Label) *container.TabItem {
+return container.NewTabItem("GPU",
+container.NewScroll(container.NewVBox(
+container.NewPadded(nameLabel),
+util.Container,
+vram.Container,
+)),
+)
+}

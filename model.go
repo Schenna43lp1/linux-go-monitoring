@@ -16,7 +16,19 @@ DiskTotal   float64
 UploadBps   float64
 DownloadBps float64
 Uptime      uint64
+GPU         GPUInfo
 Err         error
+}
+
+// GPUInfo holds GPU utilization and VRAM data for one GPU.
+type GPUInfo struct {
+Name        string
+UtilPercent float64
+VRAMUsed    float64 // bytes
+VRAMTotal   float64 // bytes
+VRAMPercent float64
+Temp        float64
+HasGPU      bool
 }
 
 // SystemInfo holds static system information.

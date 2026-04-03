@@ -38,20 +38,24 @@ return out
 
 // Histories bundles rolling windows for all tracked metrics.
 type Histories struct {
-CPU     *MetricHistory
-RAM     *MetricHistory
-Disk    *MetricHistory
-NetDown *MetricHistory
-NetUp   *MetricHistory
+CPU         *MetricHistory
+RAM         *MetricHistory
+Disk        *MetricHistory
+NetDown     *MetricHistory
+NetUp       *MetricHistory
+GPUUtil     *MetricHistory
+GPUVRAMPct  *MetricHistory
 }
 
 func NewHistories(size int) *Histories {
 return &Histories{
-CPU:     NewMetricHistory(size),
-RAM:     NewMetricHistory(size),
-Disk:    NewMetricHistory(size),
-NetDown: NewMetricHistory(size),
-NetUp:   NewMetricHistory(size),
+CPU:        NewMetricHistory(size),
+RAM:        NewMetricHistory(size),
+Disk:       NewMetricHistory(size),
+NetDown:    NewMetricHistory(size),
+NetUp:      NewMetricHistory(size),
+GPUUtil:    NewMetricHistory(size),
+GPUVRAMPct: NewMetricHistory(size),
 }
 }
 
@@ -62,4 +66,6 @@ h.RAM.Add(m.RAMPercent)
 h.Disk.Add(m.DiskPercent)
 h.NetDown.Add(m.DownloadBps)
 h.NetUp.Add(m.UploadBps)
+h.GPUUtil.Add(m.GPU.UtilPercent)
+h.GPUVRAMPct.Add(m.GPU.VRAMPercent)
 }
