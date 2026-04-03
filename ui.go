@@ -4,9 +4,12 @@
 package main
 
 import (
-"fyne.io/fyne/v2"
-"fyne.io/fyne/v2/container"
-"fyne.io/fyne/v2/widget"
+	"fmt"
+	"sync"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/widget"
 )
 
 // buildOverviewTab creates the Overview tab with CPU, RAM, Disk, Network cards.
@@ -52,11 +55,76 @@ return tab, uptimeValLabel
 
 // buildGPUTab creates the GPU tab with utilization and VRAM cards.
 func buildGPUTab(util, vram *dashCard, nameLabel *widget.Label) *container.TabItem {
-return container.NewTabItem("GPU",
-container.NewScroll(container.NewVBox(
-container.NewPadded(nameLabel),
-util.Container,
-vram.Container,
-)),
-)
+	return container.NewTabItem("GPU",
+		container.NewScroll(container.NewVBox(
+			container.NewPadded(nameLabel),
+			util.Container,
+			vram.Container,
+		)),
+	)
+}
+
+// buildProcessesTab creates the Processes tab with a live-updating table of top processes.
+// Returns the tab and an update function to be called each tick.
+func buildProcessesTab() (*container.TabItem, func([]ProcessInfo)) {
+	headers := []string{"PID", "Name", "CPU %", "RAM %", "RAM MB"}
+	colWidths := []float32{65, 200, 70, 70, 80}
+
+	var mu sync.Mutex
+	var rows []ProcessInfo
+
+	table := widget.NewTable(
+		func() (int, int) {
+			mu.Lock()
+			defer mu.Unlock()
+			return len(rows) + 1, len(headers)
+		},
+		func() fyne.CanvasObject {
+			return widget.NewLabel("")
+		},
+		func(id widget.TableCellID, obj fyne.CanvasObject) {
+			label := obj.(*widget.Label)
+			mu.Lock()
+			defer mu.Unlock()
+			if id.Row == 0 {
+				label.TextStyle = fyne.TextStyle{Bold: true}
+				label.SetText(headers[id.Col])
+				return
+			}
+			label.TextStyle = fyne.TextStyle{}
+			i := id.Row - 1
+			if i >= len(rows) {
+				label.SetText("")
+				return
+			}
+			p := rows[i]
+			switch id.Col {
+			case 0:
+				label.SetText(fmt.Sprintf("%d", p.PID))
+			case 1:
+				label.SetText(p.Name)
+			case 2:
+				label.SetText(fmt.Sprintf("%.1f", p.CPUPct))
+			case 3:
+				label.SetText(fmt.Sprintf("%.1f", p.RAMPct))
+			case 4:
+				label.SetText(fmt.Sprintf("%.0f", p.RAMMB))
+			}
+		},
+	)
+	for i, w := range colWidths {
+		table.SetColumnWidth(i, w)
+	}
+
+	update := func(procs []ProcessInfo) {
+		mu.Lock()
+		rows = procs
+		mu.Unlock()
+		table.Refresh()
+	}
+
+	tab := container.NewTabItem("⚙ Processes",
+		container.NewBorder(nil, nil, nil, nil, table),
+	)
+	return tab, update
 }
