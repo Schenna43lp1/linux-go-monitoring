@@ -4,19 +4,17 @@
 package main
 
 import (
-	"fmt"
+"fmt"
 	"os"
 	"os/exec"
-	"sort"
-	"strings"
-	"time"
+"strings"
+"time"
 
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/host"
-	"github.com/shirou/gopsutil/v3/mem"
-	psnet "github.com/shirou/gopsutil/v3/net"
-	"github.com/shirou/gopsutil/v3/process"
+"github.com/shirou/gopsutil/v3/cpu"
+"github.com/shirou/gopsutil/v3/disk"
+"github.com/shirou/gopsutil/v3/host"
+"github.com/shirou/gopsutil/v3/mem"
+psnet "github.com/shirou/gopsutil/v3/net"
 )
 
 // Collector is the interface for fetching system metrics.
@@ -62,10 +60,9 @@ m.DiskUsed = float64(d.Used)
 m.DiskTotal = float64(d.Total)
 }
 
-	m.Uptime, _ = host.Uptime()
+m.Uptime, _ = host.Uptime()
 	m.GPU = gpuInfo()
-	m.Processes = topProcesses(20)
-	m.UploadBps, m.DownloadBps = netRate(s)
+m.UploadBps, m.DownloadBps = netRate(s)
 
 return m
 }
@@ -199,37 +196,4 @@ VRAMPercent: vramPct,
 Temp:        temp,
 HasGPU:      true,
 }, true
-}
-
-// topProcesses returns the top n processes sorted by CPU usage descending.
-func topProcesses(n int) []ProcessInfo {
-procs, err := process.Processes()
-if err != nil {
-return nil
-}
-var list []ProcessInfo
-for _, p := range procs {
-cpuPct, _ := p.CPUPercent()
-memPct, _ := p.MemoryPercent()
-memInfo, _ := p.MemoryInfo()
-name, _ := p.Name()
-rss := 0.0
-if memInfo != nil {
-rss = float64(memInfo.RSS) / 1024 / 1024
-}
-list = append(list, ProcessInfo{
-PID:    p.Pid,
-Name:   name,
-CPUPct: cpuPct,
-RAMPct: float64(memPct),
-RAMMB:  rss,
-})
-}
-sort.Slice(list, func(i, j int) bool {
-return list[i].CPUPct > list[j].CPUPct
-})
-if len(list) > n {
-list = list[:n]
-}
-return list
 }

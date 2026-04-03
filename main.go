@@ -33,17 +33,15 @@ gpuUtilCard := newDashCard("🎮  GPU Utilization", colorGPU,  true,  false)
 gpuVRAMCard := newDashCard("💠  VRAM",            colorVRAM, true,  false)
 gpuNameLabel := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Italic: true})
 
-	collector               := newCollector()
-	sysInfoData             := collector.SystemInfo()
-	systemTab, uptimeValLabel := buildSystemTab(sysInfoData)
-	processesTab, updateProcesses := buildProcessesTab()
+collector               := newCollector()
+sysInfoData             := collector.SystemInfo()
+systemTab, uptimeValLabel := buildSystemTab(sysInfoData)
 
-	tabs := container.NewAppTabs(
-		buildOverviewTab(cpuCard, ramCard, diskCard, netCard),
-		buildNetworkTab(netDownCard, netUpCard),
-		systemTab,
+tabs := container.NewAppTabs(
+buildOverviewTab(cpuCard, ramCard, diskCard, netCard),
+buildNetworkTab(netDownCard, netUpCard),
+systemTab,
 		buildGPUTab(gpuUtilCard, gpuVRAMCard, gpuNameLabel),
-		processesTab,
 	)
 
 uptimeLabel := widget.NewLabel("")
@@ -144,8 +142,6 @@ netUpCard.Graph.Update(h.NetUp.Values())
 		} else {
 			gpuNameLabel.SetText("No GPU detected")
 		}
-
-		updateProcesses(m.Processes)
 })
 
 
